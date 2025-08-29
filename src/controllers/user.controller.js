@@ -113,39 +113,39 @@ export const registerUser = asyncHandler(async(req,res)=>{
 })
 
 export const loginUser = asyncHandler(async (req, res) => {
-    const { email, password } = req.body
+  const { email, password } = req.body;
 
-    if (!email || !password) {
-        throw new ApiError(400, "Email and password are required!")
-    }
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password are required!" });
+  }
 
-    const user = await User.findOne({ email: email.toLowerCase() })
-    if (!user) {
-        throw new ApiError(404, "User not found!")
-    }
+  const user = await User.findOne({ email: email.toLowerCase() });
+  if (!user) {
+    return res.status(404).json({ message: "User not found!" });
+  }
 
-    const isPasswordValid = await user.isPasswordCorrect(password)
-    if (!isPasswordValid) {
-        throw new ApiError(401, "Password incorrect!")
-    }
+  const isPasswordValid = await user.isPasswordCorrect(password);
+  if (!isPasswordValid) {
+    return res.status(401).json({ message: "Password incorrect!" });
+  }
 
-    const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id)
-    const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
-    
-    const options = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-    }
+  const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id);
+  const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
 
-    return res
-        .status(200)
-        .cookie("accessToken", accessToken, options)
-        .cookie("refreshToken", refreshToken, options)
-        .json(new ApiResponse(200, {
-            user: loggedInUser,
-            accessToken 
-        }, "User logged in successfully"))
-})
+  const options = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+  };
+
+  return res
+    .status(200)
+    .cookie("accessToken", accessToken, options)
+    .cookie("refreshToken", refreshToken, options)
+    .json(new ApiResponse(200, {
+      user: loggedInUser,
+      accessToken,
+    }, "User logged in successfully"));
+});
 
 export const getCurrentUser = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, req.user, "Current user fetched successfully!"))
