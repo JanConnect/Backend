@@ -21,5 +21,13 @@ app.use(cookieParser())
 import userRouter from "./router/user.router.js";
 app.use("/api/v1/user", userRouter);
 
+app.use((err, req, res, next) => {
+  const status = err.statuscode || 500;
+  res.status(status).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+  });
+});
 
 export {app}

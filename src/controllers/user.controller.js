@@ -116,17 +116,17 @@ export const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required!" });
+    throw new ApiError(400, "Email and password are required!")
   }
 
   const user = await User.findOne({ email: email.toLowerCase() });
   if (!user) {
-    return res.status(404).json({ message: "User not found!" });
+    throw new ApiError(404, "User not found!")
   }
 
   const isPasswordValid = await user.isPasswordCorrect(password);
   if (!isPasswordValid) {
-    return res.status(401).json({ message: "Password incorrect!" });
+     throw new ApiError(401, "Password incorrect!")
   }
 
   const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id);
