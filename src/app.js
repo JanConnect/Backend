@@ -7,7 +7,7 @@ const app = express()
 //Middlewares
 app.use(
     cors({
-        origin : process.env.CORS_ORIGIN, //frontend url
+        origin : "http://localhost:5173",  //frontend url
         credentials: true
     })
 )
