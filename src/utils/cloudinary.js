@@ -42,4 +42,53 @@ const deleteFromCloudinary = async(publicId,type)=>{
           return null
     }
 }
-export {uploadOnCloudinary,deleteFromCloudinary};
+
+const uploadMediaOnCloudinary = async (localFilePath) => {
+  try {
+    if (!localFilePath) return null;
+
+    const response = await cloudinary.uploader.upload(localFilePath, {
+      resource_type: "auto",   // auto detects (image/video/audio)
+      folder: "complaints/media"
+    });
+
+    console.log("Media uploaded to Cloudinary:", response.secure_url);
+
+    // remove local file after upload
+    fs.unlinkSync(localFilePath);
+
+    return {
+      url: response.secure_url,
+      public_id: response.public_id,
+      resource_type: response.resource_type
+    };
+  } catch (error) {
+    console.error("Error uploading media to Cloudinary:", error);
+
+    if (fs.existsSync(localFilePath)) {
+      fs.unlinkSync(localFilePath);
+    }
+
+    return null;
+  }
+};
+
+
+const deleteMediaOnCloudinary = async (publicId, resourceType = "image") => {
+  try {
+    // audio is treated as "video" by Cloudinary
+    if (resourceType === "audio") resourceType = "video";
+
+    await cloudinary.uploader.destroy(publicId, {
+      resource_type: resourceType
+    });
+
+    console.log("Media deleted from Cloudinary:", publicId);
+    return true;
+  } catch (error) {
+    console.error("Error deleting media from Cloudinary:", error);
+    return false;
+  }
+};
+
+export {uploadOnCloudinary,deleteFromCloudinary,uploadMediaOnCloudinary,deleteMediaOnCloudinary};

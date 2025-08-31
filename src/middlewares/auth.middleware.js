@@ -25,3 +25,17 @@ export const verifyJWT = asyncHandler(async (req, _ , next)=>{
     }
 
 })
+
+export const authorizeRoles = (...roles) => {
+  return asyncHandler(async (req, res, next) => {
+    if (!req.user) {
+      throw new ApiError(401, "User not authenticated");
+    }
+
+    if (!roles.includes(req.user.role)) {
+      throw new ApiError(403, `Access denied. Required roles: ${roles.join(', ')}`);
+    }
+
+    next();
+  });
+}
