@@ -149,13 +149,7 @@ const reportSchema = new mongoose.Schema({
   feedback: {
     type: String
   },
-  estimatedResolutionDate: {
-    type: Date
-  },
-  isPublic: {
-    type: Boolean,
-    default: true
-  }
+
 }, { timestamps: true });
 
 reportSchema.index({ location: "2dsphere" });

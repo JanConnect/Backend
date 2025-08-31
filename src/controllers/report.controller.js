@@ -239,7 +239,6 @@ const getAllReports = asyncHandler(async (req, res) => {
   } else if (req.user.role === 'staff') {
     filter.$or = [
       { department: req.user.department },
-      { isPublic: true }
     ];
   }
 
@@ -271,7 +270,6 @@ const getAllReports = asyncHandler(async (req, res) => {
   );
 });
 
-
 const getReportById = asyncHandler(async (req, res) => {
   const { reportId } = req.params;
 
@@ -295,9 +293,7 @@ const getReportById = asyncHandler(async (req, res) => {
   const isStaffOfDepartment = req.user.role === 'staff' && 
                              report.department?._id.toString() === req.user.department?.toString();
   const isAdmin = req.user.role === 'admin';
-  const isPublic = report.isPublic;
-
-  if (!isOwner && !isStaffOfDepartment && !isAdmin && !isPublic) {
+  if (!isOwner && !isStaffOfDepartment && !isAdmin ) {
     throw new ApiError(403, "Access denied");
   }
 
