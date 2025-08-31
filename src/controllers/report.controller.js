@@ -71,17 +71,6 @@ const findMunicipalityByDistrict = async (districtName) => {
   return municipality;
 };
 
-const selectDepartmentByCategory = async (municipalityId, category) => {
-  if (!municipalityId) return null;
-
-  const department = await Department.findOne({
-    municipality: municipalityId,
-    categories: category,
-  });
-
-  return department;
-};
-
 const createReport = asyncHandler(async (req, res) => {
   const { title, category, urgency, description, location } = req.body;
   const userId = req.user._id;
