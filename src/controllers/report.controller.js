@@ -1,6 +1,4 @@
 import { Report } from "../models/report.model.js";
-import { User } from "../models/user.model.js";
-import { Department } from "../models/department.model.js";
 import { Municipality } from "../models/municipality.model.js";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 import { ApiError } from "../utils/ApiError.js";
