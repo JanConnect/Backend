@@ -22,11 +22,13 @@ import userRouter from "./router/user.router.js";
 import reportRuter from "./router/report.router.js";
 import departmentRouter from './router/department.router.js';
 import municipalityRouter from './router/municipality.router.js';
+import adminRouter from "./router/admin.router.js"
 
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/report", reportRuter);
 app.use("/api/v1/municipality", municipalityRouter);
 app.use("/api/v1/department", departmentRouter);
+app.use("/api/v1/admin", adminRouter);
 
 app.use((err, req, res, next) => {
   const status = err.statuscode || 500;
