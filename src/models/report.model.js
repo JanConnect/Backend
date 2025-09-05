@@ -114,6 +114,10 @@ const reportSchema = new mongoose.Schema({
       type: [Number],
       required: true
     },
+    address: {  
+      type: String,
+      default: 'Unknown Location'
+    }
   },
     media: {
         url: String,
