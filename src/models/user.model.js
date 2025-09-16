@@ -42,7 +42,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["citizen", "staff", "admin"],
+      enum: ["citizen", "staff", "admin","superadmin"],
       default: "citizen",
     },
     department: {
@@ -53,6 +53,21 @@ const userSchema = new mongoose.Schema(
     },
     address: {
       type: String,
+    },
+    aadhaar: {
+        type: String,
+        required: function() {
+            return this.role === "citizen";
+        },
+        unique: true,
+        sparse: true, // allows null values but enforces uniqueness when present
+        validate: {
+            validator: function(v) {
+                // Aadhaar validation: 12 digits
+                return !v || /^\d{12}$/.test(v);
+            },
+            message: 'Aadhaar number must be exactly 12 digits'
+        }
     },
   },
   { timestamps: true }

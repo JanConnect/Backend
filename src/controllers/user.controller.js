@@ -26,7 +26,7 @@ export const generateAccessAndRefreshToken = async (userId) => {
 }
 
 export const registerUser = asyncHandler(async(req,res)=>{
-    const {name,username,email,phone,password} = req.body
+    const {name,username,email,phone,password,aadhaar} = req.body
 
     if ([name, username, email, password, phone].some((field) => field?.trim() === "")) {
         throw new ApiError(400, "All fields are required!")
@@ -38,6 +38,19 @@ export const registerUser = asyncHandler(async(req,res)=>{
     if (existedUser) {
         throw new ApiError(409, "User with this email or username already exists")
     }
+
+
+    if (aadhaar && !/^\d{12}$/.test(aadhaar)) {
+    throw new ApiError(400, "Aadhaar number must be exactly 12 digits")
+    }
+
+    if (aadhaar) {
+        const existingAadhaar = await User.findOne({ aadhaar })
+        if (existingAadhaar) {
+            throw new ApiError(409, "User with this Aadhaar number already exists")
+        }
+    }
+
    
     const avatarLocalPath = req.file?.path
     console.log(avatarLocalPath)
@@ -69,7 +82,8 @@ export const registerUser = asyncHandler(async(req,res)=>{
             email: email.toLowerCase().trim(),
             password,
             username: username.toLowerCase().trim(),
-            phone
+            phone,
+            aadhaar
         })
 
         const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id)
