@@ -2,40 +2,36 @@ import { Router } from "express";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { authorizeRoles } from "../middlewares/auth.middleware.js";
 import {
-  createDepartment,
-  getAllDepartments,
-  getDepartmentById,
-  updateDepartment,
-  deleteDepartment,
-  getDepartmentsByMunicipality,
-  getDepartmentsByCategory,
-  getDepartmentAnalytics
+    createDepartment,
+    getAllDepartments,
+    getDepartmentById,
+    updateDepartment,
+    deleteDepartment,
+    getDepartmentsByMunicipality,
+    getDepartmentsByCategory, // This exists in your controller
+    getDepartmentAnalytics
 } from "../controllers/department.controller.js";
 
 const router = Router();
 
-// Create department (Admin only)
-router.route("/create").post(verifyJWT, authorizeRoles('admin'), createDepartment);
+// All routes require authentication
+router.use(verifyJWT);
 
-// Get all departments
-router.route("/").get(verifyJWT, getAllDepartments);
+// Public department routes (authenticated users)
+router.route("/").get(getAllDepartments);
+router.route("/municipality/:municipalityId").get(getDepartmentsByMunicipality);
+router.route("/category/:category").get(getDepartmentsByCategory);
+router.route("/:departmentId").get(getDepartmentById);
 
-// Get departments by municipality
-router.route("/municipality/:municipalityId").get(verifyJWT, getDepartmentsByMunicipality);
+// Admin only routes
+router.route("/create").post(authorizeRoles('admin', 'superadmin'), createDepartment);
+router.route("/:departmentId").patch(authorizeRoles('admin', 'superadmin'), updateDepartment);
+router.route("/:departmentId").delete(authorizeRoles('admin', 'superadmin'), deleteDepartment);
 
-// Get departments by category
-router.route("/category/:category").get(verifyJWT, getDepartmentsByCategory);
-
-// Get department analytics (Staff/Admin)
-router.route("/:departmentId/analytics").get(verifyJWT, authorizeRoles('staff', 'admin'), getDepartmentAnalytics);
-
-// Get department by ID
-router.route("/:departmentId").get(verifyJWT, getDepartmentById);
-
-// Update department (Admin only)
-router.route("/:departmentId").patch(verifyJWT, authorizeRoles('admin'), updateDepartment);
-
-// Delete department (Admin only)
-router.route("/:departmentId").delete(verifyJWT, authorizeRoles('admin'), deleteDepartment);
+// Analytics routes (Staff/Admin)
+router.route("/:departmentId/analytics").get(
+    authorizeRoles('staff', 'admin', 'superadmin'), 
+    getDepartmentAnalytics
+);
 
 export default router;

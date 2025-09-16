@@ -1,686 +1,799 @@
 import { Report } from "../models/report.model.js";
 import { Municipality } from "../models/municipality.model.js";
-import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
+import { Department } from "../models/department.model.js";
+import { uploadMediaOnCloudinary, deleteMediaOnCloudinary } from "../utils/cloudinary.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import axios from 'axios';
 import fs from 'fs';
 
+// Helper Functions
 const generateReportId = async (category) => {
-  const categoryCode = category.substring(0, 4).toUpperCase();
-  const count = await Report.countDocuments({ category });
-  return `${categoryCode}-${String(count + 1).padStart(3, '0')}`;
+    const categoryCode = category.substring(0, 4).toUpperCase();
+    const count = await Report.countDocuments({ category });
+    return `${categoryCode}-${String(count + 1).padStart(3, '0')}`;
 };
 
 const findNearestMunicipality = async (coordinates) => {
-  const [longitude, latitude] = coordinates;
-  
-  const nearestMunicipality = await Municipality.findOne({
-    location: {
-      $near: {
-        $geometry: {
-          type: "Point",
-          coordinates: [longitude, latitude]
-        },
-        $maxDistance: 20000 // 20km in meters
-      }
-    },
-    
-  });
-
-  return nearestMunicipality;
+    const [longitude, latitude] = coordinates;
+    const nearestMunicipality = await Municipality.findOne({
+        location: {
+            $near: {
+                $geometry: {
+                    type: "Point",
+                    coordinates: [longitude, latitude]
+                },
+                $maxDistance: 20000 // 20km in meters
+            }
+        }
+    });
+    return nearestMunicipality;
 };
 
 const reverseGeocode = async (coordinates) => {
-  const [longitude, latitude] = coordinates;
-  
-  try {
-    const response = await axios.get(`https://api.opencagedata.com/geocode/v1/json`, {
-      params: {
-        q: `${latitude},${longitude}`,
-        key: process.env.OPENCAGE_API_KEY,
-        language: 'en',
-        countrycode: 'in'
-      }
-    });
+    const [longitude, latitude] = coordinates;
+    try {
+        const response = await axios.get(`https://api.opencagedata.com/geocode/v1/json`, {
+            params: {
+                q: `${latitude},${longitude}`,
+                key: process.env.OPENCAGE_API_KEY,
+                language: 'en',
+                countrycode: 'in'
+            }
+        });
 
-    if (response.data.results && response.data.results.length > 0) {
-      const result = response.data.results[0];
-      const district = result.components.state_district || 
-                     result.components.county || 
-                     result.components.district;
-      return district;
+        if (response.data.results && response.data.results.length > 0) {
+            const result = response.data.results[0];
+            const district = result.components.state_district ||
+                result.components.county ||
+                result.components.district;
+            return district;
+        }
+        return null;
+    } catch (error) {
+        console.error('Reverse geocoding error:', error);
+        return null;
     }
-    return null;
-  } catch (error) {
-    console.error('Reverse geocoding error:', error);
-    return null;
-  }
 };
 
 const findMunicipalityByDistrict = async (districtName) => {
-  if (!districtName) return null;
-  
-  const municipality = await Municipality.findOne({
-    district: { $regex: new RegExp(districtName, 'i') },
-  });
-
-  return municipality;
+    if (!districtName) return null;
+    const municipality = await Municipality.findOne({
+        district: { $regex: new RegExp(districtName, 'i') },
+    });
+    return municipality;
 };
 
-const createReport = asyncHandler(async (req, res) => {
-  const { title, category, urgency, description, location } = req.body;
-  const userId = req.user._id;
-  if (!title || !category || !description ) {
-    throw new ApiError(400, "All required fields must be provided");
-  }
+// Create report with single image + optional voice message
+export const createReport = asyncHandler(async (req, res) => {
+    const { title, category, urgency, description, location } = req.body;
+    const userId = req.user._id;
 
+    // Validate required fields
+    if (!title || !category) {
+        throw new ApiError(400, "Title and category are required");
+    }
+
+    // Check if we have either description OR voice message
+    const hasDescription = description && description.trim();
+    const hasVoiceMessage = req.files?.voiceMessage && req.files.voiceMessage[0];
+
+    if (!hasDescription && !hasVoiceMessage) {
+        throw new ApiError(400, "Either description or voice message is required");
+    }
+
+    // Parse and validate location coordinates
     let coordinates;
-  
-  if (location.coordinates) {
-    if (typeof location.coordinates === 'string') {
-      try {
-        coordinates = JSON.parse(location.coordinates);
-      } catch (error) {
-        throw new ApiError(400, "Invalid coordinates format - unable to parse JSON");
-      }
-    } else {
-      coordinates = location.coordinates;
-    }
-  } else {
-    throw new ApiError(400, "Location coordinates are required");
-  }
-
-  // Validate coordinates array
-  if (!Array.isArray(coordinates) || coordinates.length !== 2) {
-    throw new ApiError(400, "Coordinates must be an array with [longitude, latitude]");
-  }
-
-  // Convert to numbers and validate
-  const [longitude, latitude] = coordinates.map(coord => parseFloat(coord));
-  
-  if (isNaN(longitude) || isNaN(latitude)) {
-    throw new ApiError(400, "Coordinates must be valid numbers");
-  }
-
-  // Update location object with parsed coordinates
-  location.coordinates = [longitude, latitude];
-
-  console.log("✅ Parsed coordinates:", location.coordinates);
-
-
-  if (!location.coordinates || location.coordinates.length !== 2) {
-    throw new ApiError(400, "Valid coordinates (longitude, latitude) are required");
-  }
-
-  const reportId = await generateReportId(category);
-  console.log(reportId)
-  let media ;
-  let uploadedFilePath ;
-
- try {
-    // Handle single file upload (either image or video)
-    if (req.file) {
-      uploadedFilePath = req.file.path;
-      
-      // Determine media type from file mimetype
-      let mediaType;
-      if (req.file.mimetype.startsWith('image/')) {
-        mediaType = 'image';
-      } else if (req.file.mimetype.startsWith('video/')) {
-        mediaType = 'video';
-      } else {
-        throw new ApiError(400, "Only images and videos are allowed");
-      }
-      
-      console.log(`📁 Uploading ${mediaType} file:`, req.file.originalname);
-      
-      const uploadResult = await uploadOnCloudinary(req.file.path);
-      if (uploadResult) {
-        media = {
-          url: uploadResult.secure_url,
-          publicId: uploadResult.public_id,
-          type: mediaType
-        };
-        console.log(`✅ ${mediaType} uploaded successfully`);
-      }
-    }
-
-    let selectedMunicipality = await findNearestMunicipality(location.coordinates);
-    let selectionMethod = "nearest";
-    
-    if (!selectedMunicipality) {
-      console.log("No municipality found within 20km, trying reverse geocoding...");
-      
-      const districtName = await reverseGeocode(location.coordinates);
-      if (districtName) {
-        selectedMunicipality = await findMunicipalityByDistrict(districtName);
-        selectionMethod = "district-based";
-        console.log(`Found municipality in district: ${districtName}`);
-      }
-    }
-
-    if (!selectedMunicipality) {
-      throw new ApiError(404, "No municipality found for this location. Please contact support.");
-    }
-    
-
-    const report = await Report.create({
-      reportId,
-      title,
-      category,
-      urgency: urgency || "medium",
-      description,
-      location,
-      media,
-      reportedBy: userId,
-      priority: 2,
-      municipality: selectedMunicipality._id,
-    });
-
-    const populatedReport = await Report.findById(report._id)
-      .populate('reportedBy', 'name email')
-      .populate('municipality', 'name district')
-
-    res.status(201).json(
-      new ApiResponse(201, {
-        report: populatedReport,
-        autoSelected: {
-          municipality: selectedMunicipality.name,
-          selectionMethod
+    if (location?.coordinates) {
+        if (typeof location.coordinates === 'string') {
+            try {
+                coordinates = JSON.parse(location.coordinates);
+            } catch (error) {
+                throw new ApiError(400, "Invalid coordinates format");
+            }
+        } else {
+            coordinates = location.coordinates;
         }
-      }, "Report created successfully")
-    );
-  } catch (error) {
-    if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-      fs.unlinkSync(uploadedFilePath);
+    } else {
+        throw new ApiError(400, "Location coordinates are required");
     }
-    throw error;
-  }
-});
 
-const getAllReports = asyncHandler(async (req, res) => {
-  const {
-    page = 1,
-    limit = 10,
-    status,
-    category,
-    urgency,
-    priority,
-    municipality,
-    department,
-    sortBy = 'priority',
-    sortOrder = 'desc',
-    search
-  } = req.query;
-
-  const filter = {};
-  
-  if (status) filter.status = status;
-  if (category) filter.category = category;
-  if (urgency) filter.urgency = urgency;
-  if (priority) filter.priority = priority;
-  if (municipality) filter.municipality = municipality;
-  if (department) filter.department = department;
-  
-  if (search) {
-    filter.$or = [
-      { title: { $regex: search, $options: 'i' } },
-      { description: { $regex: search, $options: 'i' } },
-      { reportId: { $regex: search, $options: 'i' } }
-    ];
-  }
-
-  if (req.user.role === 'citizen') {
-    filter.isPublic = true;
-  } else if (req.user.role === 'staff') {
-    filter.$or = [
-      { department: req.user.department },
-    ];
-  }
-
-  const sort = {};
-  sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
-
-  // Execute query with pagination
-  const reports = await Report.find(filter)
-    .populate('reportedBy', 'name email')
-    .populate('municipality', 'name')
-    .populate('department', 'name')
-    .populate('assignedTo', 'name')
-    .sort(sort)
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
-    .exec();
-
-  const totalReports = await Report.countDocuments(filter);
-
-  res.status(200).json(
-    new ApiResponse(200, {
-      reports,
-      totalPages: Math.ceil(totalReports / limit),
-      currentPage: parseInt(page),
-      totalReports,
-      hasNextPage: page < Math.ceil(totalReports / limit),
-      hasPrevPage: page > 1
-    }, "Reports retrieved successfully")
-  );
-});
-
-const getReportById = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-
-  const report = await Report.findOne({ reportId })
-    .populate('reportedBy', 'name email phone')
-    .populate('municipality', 'name contactPerson')
-    .populate('department', 'name contactPerson')
-    .populate('assignedTo', 'name email')
-    .populate('updates.updatedBy', 'name')
-    .populate({
-      path: 'upvotes.userId',
-      select: 'name'
-    });
-
-  if (!report) {
-    throw new ApiError(404, "Report not found");
-  }
-
-  // Check if user has permission to view this report
-  const isOwner = report.reportedBy._id.toString() === req.user._id.toString();
-  const isStaffOfDepartment = req.user.role === 'staff' && 
-                             report.department?._id.toString() === req.user.department?.toString();
-  const isAdmin = req.user.role === 'admin';
-  if (!isOwner && !isStaffOfDepartment && !isAdmin ) {
-    throw new ApiError(403, "Access denied");
-  }
-
-  // Check if current user has upvoted
-  const hasUpvoted = report.upvotes.some(upvote => 
-    upvote.userId._id.toString() === req.user._id.toString()
-  );
-
-  const reportData = report.toObject();
-  reportData.hasUpvoted = hasUpvoted;
-
-  res.status(200).json(
-    new ApiResponse(200, reportData, "Report retrieved successfully")
-  );
-});
-
-// Update report status (Staff/Admin only)
-const updateReportStatus = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-  const { status, message, estimatedResolutionDate } = req.body;
-
-  const report = await Report.findOne({ reportId });
-  if (!report) {
-    throw new ApiError(404, "Report not found");
-  }
-
-  // Check if staff member is updating report from their department
-  if (req.user.role === 'staff' && 
-      report.department?.toString() !== req.user.department?.toString()) {
-    throw new ApiError(403, "You can only update reports from your department");
-  }
-
-  // Update status
-  if (status) {
-    const validStatuses = ["pending", "acknowledged", "in-progress", "resolved", "rejected"];
-    if (!validStatuses.includes(status)) {
-      throw new ApiError(400, "Invalid status provided");
+    if (!Array.isArray(coordinates) || coordinates.length !== 2) {
+        throw new ApiError(400, "Coordinates must be an array with [longitude, latitude]");
     }
+
+    const [longitude, latitude] = coordinates.map(coord => parseFloat(coord));
+    if (isNaN(longitude) || isNaN(latitude)) {
+        throw new ApiError(400, "Coordinates must be valid numbers");
+    }
+
+    location.coordinates = [longitude, latitude];
+
+    const reportId = await generateReportId(category);
     
-    report.status = status;
-    if (status === 'resolved') {
-      report.resolvedDate = new Date();
+    let imageData = null;
+    let voiceMessageData = null;
+    let uploadedFiles = [];
+
+    try {
+        // Handle single image upload
+        if (req.files?.image && req.files.image[0]) {
+            const imageFile = req.files.image[0];
+            uploadedFiles.push(imageFile.path);
+            
+            console.log(`📁 Uploading image:`, imageFile.originalname);
+            const imageUpload = await uploadMediaOnCloudinary(imageFile.path, 'media');
+            
+            if (imageUpload) {
+                imageData = {
+                    url: imageUpload.url,
+                    publicId: imageUpload.publicId,
+                    uploadedAt: new Date()
+                };
+                console.log(`✅ Image uploaded successfully`);
+            }
+        }
+
+        // Handle voice message upload
+        if (hasVoiceMessage) {
+            const voiceFile = req.files.voiceMessage[0];
+            uploadedFiles.push(voiceFile.path);
+            
+            console.log(`📁 Uploading voice message:`, voiceFile.originalname);
+            const voiceUpload = await uploadMediaOnCloudinary(voiceFile.path, 'voice');
+            
+            if (voiceUpload) {
+                voiceMessageData = {
+                    url: voiceUpload.url,
+                    publicId: voiceUpload.publicId,
+                    duration: voiceUpload.duration || 0,
+                    uploadedAt: new Date()
+                };
+                console.log(`✅ Voice message uploaded successfully`);
+            }
+        }
+
+        // Find municipality for the location
+        let selectedMunicipality = await findNearestMunicipality(location.coordinates);
+        let selectionMethod = "nearest";
+
+        if (!selectedMunicipality) {
+            console.log("No municipality found within 20km, trying reverse geocoding...");
+            const districtName = await reverseGeocode(location.coordinates);
+            if (districtName) {
+                selectedMunicipality = await findMunicipalityByDistrict(districtName);
+                selectionMethod = "district-based";
+                console.log(`Found municipality in district: ${districtName}`);
+            }
+        }
+
+        if (!selectedMunicipality) {
+            throw new ApiError(404, "No municipality found for this location. Please contact support.");
+        }
+
+        // Create report data
+        const reportData = {
+            reportId,
+            title,
+            category,
+            urgency: urgency || "medium",
+            location,
+            reportedBy: userId,
+            municipality: selectedMunicipality._id
+        };
+
+        // Add description if provided
+        if (hasDescription) {
+            reportData.description = description.trim();
+        }
+
+        // Add voice message if provided
+        if (voiceMessageData) {
+            reportData.voiceMessage = voiceMessageData;
+        }
+
+        // Add image if provided
+        if (imageData) {
+            reportData.image = imageData;
+        }
+
+        // Auto-assign to department based on category (if not "Other")
+        if (category !== "Other") {
+            const department = await Department.findOne({
+                municipality: selectedMunicipality._id,
+                categories: { $in: [category] }
+            });
+
+            if (department) {
+                reportData.department = department._id;
+                reportData.assignmentType = "automatic";
+                reportData.status = "assigned";
+            }
+        } else {
+            reportData.status = "pending_assignment";
+            reportData.assignmentType = "pending";
+        }
+
+        const report = await Report.create(reportData);
+
+        const populatedReport = await Report.findById(report._id)
+            .populate('reportedBy', 'name email')
+            .populate('municipality', 'name district')
+            .populate('department', 'name');
+
+        // Clean up uploaded files
+        uploadedFiles.forEach(path => {
+            if (fs.existsSync(path)) {
+                fs.unlinkSync(path);
+            }
+        });
+
+        res.status(201).json(
+            new ApiResponse(201, {
+                report: populatedReport,
+                autoSelected: {
+                    municipality: selectedMunicipality.name,
+                    selectionMethod
+                }
+            }, "Report created successfully")
+        );
+
+    } catch (error) {
+        // Clean up uploaded files on error
+        uploadedFiles.forEach(path => {
+            if (fs.existsSync(path)) {
+                fs.unlinkSync(path);
+            }
+        });
+
+        // Clean up uploaded media from Cloudinary on error
+        if (voiceMessageData?.publicId) {
+            await deleteMediaOnCloudinary(voiceMessageData.publicId, 'video');
+        }
+        
+        if (imageData?.publicId) {
+            await deleteMediaOnCloudinary(imageData.publicId, 'image');
+        }
+
+        throw error;
     }
-  }
+});
 
-  if (estimatedResolutionDate) {
-    report.estimatedResolutionDate = new Date(estimatedResolutionDate);
-  }
+// Get all reports with enhanced filtering
+export const getAllReports = asyncHandler(async (req, res) => {
+    const {
+        page = 1,
+        limit = 10,
+        status,
+        category,
+        urgency,
+        priority,
+        municipality,
+        department,
+        sortBy = 'priority',
+        sortOrder = 'desc',
+        search,
+        hasVoiceMessage,
+        hasImage
+    } = req.query;
 
-  // Add update message
-  if (message) {
-    report.updates.push({
-      date: new Date(),
-      message,
-      updatedBy: req.user._id
+    const filter = {};
+    
+    // Basic filters
+    if (status) filter.status = status;
+    if (category) filter.category = category;
+    if (urgency) filter.urgency = urgency;
+    if (priority) filter.priority = priority;
+    if (municipality) filter.municipality = municipality;
+    if (department) filter.department = department;
+
+    // Media filters
+    if (hasVoiceMessage === 'true') filter['voiceMessage.url'] = { $exists: true };
+    if (hasImage === 'true') filter['image.url'] = { $exists: true };
+
+    // Search functionality
+    if (search) {
+        filter.$or = [
+            { title: { $regex: search, $options: 'i' } },
+            { description: { $regex: search, $options: 'i' } },
+            { reportId: { $regex: search, $options: 'i' } },
+            { 'voiceMessage.transcription': { $regex: search, $options: 'i' } }
+        ];
+    }
+
+    // Role-based filtering
+    if (req.user.role === 'citizen') {
+        filter.$or = [
+            { reportedBy: req.user._id },
+            { status: { $in: ['acknowledged', 'in-progress', 'resolved'] } }
+        ];
+    } else if (req.user.role === 'staff') {
+        filter.department = req.user.department;
+    }
+
+    const sort = {};
+    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+    const reports = await Report.find(filter)
+        .populate('reportedBy', 'name email')
+        .populate('municipality', 'name')
+        .populate('department', 'name')
+        .populate('assignedTo', 'name')
+        .sort(sort)
+        .limit(limit * 1)
+        .skip((page - 1) * limit)
+        .exec();
+
+    const totalReports = await Report.countDocuments(filter);
+
+    // Add content summary for each report
+    const reportsWithSummary = reports.map(report => {
+        const reportObj = report.toObject();
+        reportObj.contentSummary = report.getContentSummary ? 
+            report.getContentSummary() : 
+            (report.description || '[Voice Message]');
+        return reportObj;
     });
-  }
 
-  // Assign report to current user if not already assigned
-  if (!report.assignedTo && req.user.role === 'staff') {
-    report.assignedTo = req.user._id;
-  }
+    res.status(200).json(
+        new ApiResponse(200, {
+            reports: reportsWithSummary,
+            pagination: {
+                totalPages: Math.ceil(totalReports / limit),
+                currentPage: parseInt(page),
+                totalReports,
+                hasNextPage: page < Math.ceil(totalReports / limit),
+                hasPrevPage: page > 1,
+                limit: parseInt(limit)
+            }
+        }, "Reports retrieved successfully")
+    );
+});
 
-  await report.save();
+// Get report by ID
+export const getReportById = asyncHandler(async (req, res) => {
+    const { reportId } = req.params;
 
-  const updatedReport = await Report.findById(report._id)
-    .populate('reportedBy', 'name email')
-    .populate('assignedTo', 'name')
-    .populate('updates.updatedBy', 'name');
+    const report = await Report.findOne({ reportId })
+        .populate('reportedBy', 'name email phone')
+        .populate('municipality', 'name admin')
+        .populate('department', 'name')
+        .populate('assignedTo', 'name email')
+        .populate('updates.updatedBy', 'name')
+        .populate('resolutionEvidence.workCompletedBy', 'name')
+        .populate({
+            path: 'upvotes.userId',
+            select: 'name'
+        });
 
-  res.status(200).json(
-    new ApiResponse(200, updatedReport, "Report status updated successfully")
-  );
+    if (!report) {
+        throw new ApiError(404, "Report not found");
+    }
+
+    // Check permissions
+    const isOwner = report.reportedBy._id.toString() === req.user._id.toString();
+    const isStaffOfDepartment = req.user.role === 'staff' &&
+        report.department?._id.toString() === req.user.department?.toString();
+    const isAdmin = ['admin', 'superadmin'].includes(req.user.role);
+
+    if (!isOwner && !isStaffOfDepartment && !isAdmin) {
+        throw new ApiError(403, "Access denied");
+    }
+
+    // Check if current user has upvoted
+    const hasUpvoted = report.upvotes.some(upvote =>
+        upvote.userId._id.toString() === req.user._id.toString()
+    );
+
+    const reportData = report.toObject();
+    reportData.hasUpvoted = hasUpvoted;
+    reportData.contentSummary = report.getContentSummary ? report.getContentSummary() : 
+        (report.description || '[Voice Message]');
+
+    res.status(200).json(
+        new ApiResponse(200, reportData, "Report retrieved successfully")
+    );
+});
+
+// Update report status with single resolution image
+export const updateReportStatus = asyncHandler(async (req, res) => {
+    const { reportId } = req.params;
+    const { status, message, resolutionNotes, materialsCost, laborHours } = req.body;
+
+    const report = await Report.findOne({ reportId });
+    if (!report) {
+        throw new ApiError(404, "Report not found");
+    }
+
+    // Permission check
+    if (req.user.role === 'staff' &&
+        report.department?.toString() !== req.user.department?.toString()) {
+        throw new ApiError(403, "You can only update reports from your department");
+    }
+
+    const validStatuses = ["pending", "acknowledged", "in-progress", "resolved", "rejected", "pending_assignment"];
+    if (status && !validStatuses.includes(status)) {
+        throw new ApiError(400, "Invalid status provided");
+    }
+
+    let resolutionImageData = null;
+    
+    // Handle single resolution image upload for resolved reports
+    if (status === 'resolved' && req.file) {
+        try {
+            console.log(`📁 Uploading resolution image:`, req.file.originalname);
+            const imageUpload = await uploadMediaOnCloudinary(req.file.path, 'resolution');
+            
+            if (imageUpload) {
+                resolutionImageData = {
+                    url: imageUpload.url,
+                    publicId: imageUpload.publicId,
+                    uploadedAt: new Date(),
+                    description: `Resolution evidence for ${report.title}`,
+                    uploadedBy: req.user._id
+                };
+                console.log(`✅ Resolution image uploaded successfully`);
+            }
+
+            // Clean up local file
+            if (fs.existsSync(req.file.path)) {
+                fs.unlinkSync(req.file.path);
+            }
+        } catch (error) {
+            // Clean up uploaded image on error
+            if (resolutionImageData?.publicId) {
+                await deleteMediaOnCloudinary(resolutionImageData.publicId, 'image');
+            }
+            throw error;
+        }
+    }
+
+    // Update report status
+    if (status) {
+        report.status = status;
+        
+        if (status === 'resolved') {
+            report.resolvedDate = new Date();
+            report.resolutionTime = (new Date() - report.date) / (1000 * 60 * 60); // hours
+            
+            if (resolutionImageData || resolutionNotes || materialsCost || laborHours) {
+                report.resolutionEvidence = {
+                    ...report.resolutionEvidence,
+                    resolutionImage: resolutionImageData,
+                    resolutionNotes,
+                    workCompletedBy: req.user._id,
+                    completionDate: new Date(),
+                    materialsCost,
+                    laborHours
+                };
+            }
+        }
+    }
+
+    // Add status update message
+    if (message) {
+        report.updates.push({
+            date: new Date(),
+            message,
+            updatedBy: req.user._id
+        });
+    }
+
+    // Auto-assign to current staff member if not assigned
+    if (!report.assignedTo && req.user.role === 'staff') {
+        report.assignedTo = req.user._id;
+    }
+
+    await report.save();
+
+    const updatedReport = await Report.findById(report._id)
+        .populate('reportedBy', 'name email')
+        .populate('assignedTo', 'name')
+        .populate('updates.updatedBy', 'name')
+        .populate('resolutionEvidence.workCompletedBy', 'name');
+
+    res.status(200).json(
+        new ApiResponse(200, updatedReport, "Report status updated successfully")
+    );
 });
 
 // Add upvote to report
-const upvoteReport = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-  const userId = req.user._id;
+export const upvoteReport = asyncHandler(async (req, res) => {
+    const { reportId } = req.params;
+    const userId = req.user._id;
 
-  const report = await Report.findOne({ reportId });
-  if (!report) {
-    throw new ApiError(404, "Report not found");
-  }
-
-  // Check if report is resolved (can't upvote resolved reports)
-  if (report.status === 'resolved') {
-    throw new ApiError(400, "Cannot upvote resolved reports");
-  }
-
-  try {
-    await report.addUpvote(userId);
-    
-    res.status(200).json(
-      new ApiResponse(200, {
-        upvoteCount: report.upvoteCount,
-        priority: report.priority,
-        priorityBreakdown: report.priorityBreakdown,
-        hasUpvoted: true
-      }, "Upvote added successfully")
-    );
-  } catch (error) {
-    if (error.message === 'User has already upvoted this report') {
-      throw new ApiError(400, error.message);
+    const report = await Report.findOne({ reportId });
+    if (!report) {
+        throw new ApiError(404, "Report not found");
     }
-    throw new ApiError(500, "Error adding upvote");
-  }
+
+    if (report.status === 'resolved') {
+        throw new ApiError(400, "Cannot upvote resolved reports");
+    }
+
+    try {
+        if (report.addUpvote) {
+            await report.addUpvote(userId);
+        } else {
+            // Fallback manual implementation
+            const existingUpvote = report.upvotes.find(upvote =>
+                upvote.userId.toString() === userId.toString()
+            );
+            
+            if (existingUpvote) {
+                throw new ApiError(400, "User has already upvoted this report");
+            }
+            
+            report.upvotes.push({ userId });
+            report.upvoteCount = report.upvotes.length;
+            await report.save();
+        }
+
+        res.status(200).json(
+            new ApiResponse(200, {
+                upvoteCount: report.upvoteCount,
+                priority: report.priority,
+                hasUpvoted: true
+            }, "Upvote added successfully")
+        );
+    } catch (error) {
+        if (error.message === 'User has already upvoted this report') {
+            throw new ApiError(400, error.message);
+        }
+        throw new ApiError(500, "Error adding upvote");
+    }
 });
 
 // Remove upvote from report
-const removeUpvote = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-  const userId = req.user._id;
+export const removeUpvote = asyncHandler(async (req, res) => {
+    const { reportId } = req.params;
+    const userId = req.user._id;
 
-  const report = await Report.findOne({ reportId });
-  if (!report) {
-    throw new ApiError(404, "Report not found");
-  }
+    const report = await Report.findOne({ reportId });
+    if (!report) {
+        throw new ApiError(404, "Report not found");
+    }
 
-  try {
-    await report.removeUpvote(userId);
-    
-    res.status(200).json(
-      new ApiResponse(200, {
-        upvoteCount: report.upvoteCount,
-        priority: report.priority,
-        priorityBreakdown: report.priorityBreakdown,
-        hasUpvoted: false
-      }, "Upvote removed successfully")
-    );
-  } catch (error) {
-    throw new ApiError(500, "Error removing upvote");
-  }
+    try {
+        if (report.removeUpvote) {
+            await report.removeUpvote(userId);
+        } else {
+            // Fallback manual implementation
+            report.upvotes = report.upvotes.filter(upvote =>
+                upvote.userId.toString() !== userId.toString()
+            );
+            report.upvoteCount = report.upvotes.length;
+            await report.save();
+        }
+
+        res.status(200).json(
+            new ApiResponse(200, {
+                upvoteCount: report.upvoteCount,
+                priority: report.priority,
+                hasUpvoted: false
+            }, "Upvote removed successfully")
+        );
+    } catch (error) {
+        throw new ApiError(500, "Error removing upvote");
+    }
 });
 
-// Add rating and feedback (Report creator only)
-const addFeedback = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-  const { rating, feedback } = req.body;
+// Add rating and feedback
+export const addFeedback = asyncHandler(async (req, res) => {
+    const { reportId } = req.params;
+    const { rating, feedback } = req.body;
 
-  const report = await Report.findOne({ reportId });
-  if (!report) {
-    throw new ApiError(404, "Report not found");
-  }
-
-  // Check if user is the report creator
-  if (report.reportedBy.toString() !== req.user._id.toString()) {
-    throw new ApiError(403, "Only the report creator can add feedback");
-  }
-
-  // Check if report is resolved
-  if (report.status !== 'resolved') {
-    throw new ApiError(400, "Feedback can only be added to resolved reports");
-  }
-
-  if (rating) {
-    if (rating < 1 || rating > 5) {
-      throw new ApiError(400, "Rating must be between 1 and 5");
+    const report = await Report.findOne({ reportId });
+    if (!report) {
+        throw new ApiError(404, "Report not found");
     }
-    report.rating = rating;
-  }
 
-  if (feedback) {
-    report.feedback = feedback;
-  }
+    if (report.reportedBy.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "Only the report creator can add feedback");
+    }
 
-  await report.save();
+    if (report.status !== 'resolved') {
+        throw new ApiError(400, "Feedback can only be added to resolved reports");
+    }
 
-  res.status(200).json(
-    new ApiResponse(200, { 
-      rating: report.rating, 
-      feedback: report.feedback 
-    }, "Feedback added successfully")
-  );
+    if (rating) {
+        if (rating < 1 || rating > 5) {
+            throw new ApiError(400, "Rating must be between 1 and 5");
+        }
+        report.rating = rating;
+    }
+
+    if (feedback) {
+        report.feedback = feedback;
+    }
+
+    await report.save();
+
+    res.status(200).json(
+        new ApiResponse(200, {
+            rating: report.rating,
+            feedback: report.feedback
+        }, "Feedback added successfully")
+    );
 });
 
 // Get user's reports
-const getUserReports = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
-  const { page = 1, limit = 10, status } = req.query;
+export const getUserReports = asyncHandler(async (req, res) => {
+    const userId = req.user._id;
+    const { page = 1, limit = 10, status } = req.query;
 
-  const filter = { reportedBy: userId };
-  if (status) filter.status = status;
+    const filter = { reportedBy: userId };
+    if (status) filter.status = status;
 
-  const reports = await Report.find(filter)
-    .populate('municipality', 'name')
-    .populate('department', 'name')
-    .populate('assignedTo', 'name')
-    .sort({ createdAt: -1 })
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
-    .exec();
+    const reports = await Report.find(filter)
+        .populate('municipality', 'name')
+        .populate('department', 'name')
+        .populate('assignedTo', 'name')
+        .sort({ createdAt: -1 })
+        .limit(limit * 1)
+        .skip((page - 1) * limit)
+        .exec();
 
-  const totalReports = await Report.countDocuments(filter);
+    const totalReports = await Report.countDocuments(filter);
 
-  res.status(200).json(
-    new ApiResponse(200, {
-      reports,
-      totalPages: Math.ceil(totalReports / limit),
-      currentPage: parseInt(page),
-      totalReports,
-      hasNextPage: page < Math.ceil(totalReports / limit),
-      hasPrevPage: page > 1
-    }, "User reports retrieved successfully")
-  );
+    // Add content summary for each report
+    const reportsWithSummary = reports.map(report => {
+        const reportObj = report.toObject();
+        reportObj.contentSummary = report.getContentSummary ? 
+            report.getContentSummary() : 
+            (report.description || '[Voice Message]');
+        return reportObj;
+    });
+
+    res.status(200).json(
+        new ApiResponse(200, {
+            reports: reportsWithSummary,
+            pagination: {
+                totalPages: Math.ceil(totalReports / limit),
+                currentPage: parseInt(page),
+                totalReports,
+                hasNextPage: page < Math.ceil(totalReports / limit),
+                hasPrevPage: page > 1,
+                limit: parseInt(limit)
+            }
+        }, "User reports retrieved successfully")
+    );
 });
 
-// Get reports analytics (Admin/Staff only)
-const getReportsAnalytics = asyncHandler(async (req, res) => {
-  // Base filter for analytics
-  let baseFilter = {};
-  
-  // If staff, only show analytics for their department
-  if (req.user.role === 'staff') {
-    baseFilter.department = req.user.department;
-  }
+// Get reports analytics
+export const getReportsAnalytics = asyncHandler(async (req, res) => {
+    let baseFilter = {};
 
-  const analytics = await Report.aggregate([
-    { $match: baseFilter },
-    {
-      $group: {
-        _id: null,
-        totalReports: { $sum: 1 },
-        pendingReports: {
-          $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] }
-        },
-        acknowledgedReports: {
-          $sum: { $cond: [{ $eq: ["$status", "acknowledged"] }, 1, 0] }
-        },
-        inProgressReports: {
-          $sum: { $cond: [{ $eq: ["$status", "in-progress"] }, 1, 0] }
-        },
-        resolvedReports: {
-          $sum: { $cond: [{ $eq: ["$status", "resolved"] }, 1, 0] }
-        },
-        rejectedReports: {
-          $sum: { $cond: [{ $eq: ["$status", "rejected"] }, 1, 0] }
-        },
-        avgRating: { $avg: "$rating" },
-        totalUpvotes: { $sum: "$upvoteCount" },
-        avgPriority: { $avg: "$priority" },
-        avgResolutionTime: {
-          $avg: {
-            $cond: [
-              { $ne: ["$resolvedDate", null] },
-              { $subtract: ["$resolvedDate", "$date"] },
-              null
-            ]
-          }
-        }
-      }
+    // Role-based filter
+    if (req.user.role === 'staff') {
+        baseFilter.department = req.user.department;
     }
-  ]);
 
-  const categoryStats = await Report.aggregate([
-    { $match: baseFilter },
-    {
-      $group: {
-        _id: "$category",
-        count: { $sum: 1 },
-        avgPriority: { $avg: "$priority" },
-        avgRating: { $avg: "$rating" },
-        resolvedCount: {
-          $sum: { $cond: [{ $eq: ["$status", "resolved"] }, 1, 0] }
+    const analytics = await Report.aggregate([
+        { $match: baseFilter },
+        {
+            $group: {
+                _id: null,
+                totalReports: { $sum: 1 },
+                pendingReports: {
+                    $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] }
+                },
+                resolvedReports: {
+                    $sum: { $cond: [{ $eq: ["$status", "resolved"] }, 1, 0] }
+                },
+                reportsWithVoice: {
+                    $sum: { $cond: [{ $ne: ["$voiceMessage.url", null] }, 1, 0] }
+                },
+                reportsWithImage: {
+                    $sum: { $cond: [{ $ne: ["$image.url", null] }, 1, 0] }
+                },
+                avgRating: { $avg: "$rating" },
+                totalUpvotes: { $sum: "$upvoteCount" },
+                avgPriority: { $avg: "$priority" }
+            }
         }
-      }
-    },
-    { $sort: { count: -1 } }
-  ]);
+    ]);
 
-  const urgencyStats = await Report.aggregate([
-    { $match: baseFilter },
-    {
-      $group: {
-        _id: "$urgency",
-        count: { $sum: 1 },
-        avgResolutionTime: {
-          $avg: {
-            $cond: [
-              { $ne: ["$resolvedDate", null] },
-              { $subtract: ["$resolvedDate", "$date"] },
-              null
-            ]
-          }
-        }
-      }
-    }
-  ]);
-
-  // Recent reports trend (last 30 days)
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-  const recentTrend = await Report.aggregate([
-    { 
-      $match: { 
-        ...baseFilter,
-        date: { $gte: thirtyDaysAgo }
-      }
-    },
-    {
-      $group: {
-        _id: {
-          $dateToString: { format: "%Y-%m-%d", date: "$date" }
+    const categoryStats = await Report.aggregate([
+        { $match: baseFilter },
+        {
+            $group: {
+                _id: "$category",
+                count: { $sum: 1 },
+                avgPriority: { $avg: "$priority" },
+                voiceMessageCount: {
+                    $sum: { $cond: [{ $ne: ["$voiceMessage.url", null] }, 1, 0] }
+                }
+            }
         },
-        count: { $sum: 1 }
-      }
-    },
-    { $sort: { "_id": 1 } }
-  ]);
+        { $sort: { count: -1 } }
+    ]);
 
-  res.status(200).json(
-    new ApiResponse(200, {
-      overview: analytics[0] || {},
-      categoryStats,
-      urgencyStats,
-      recentTrend,
-      generatedAt: new Date()
-    }, "Analytics retrieved successfully")
-  );
+    res.status(200).json(
+        new ApiResponse(200, {
+            overview: analytics[0] || {},
+            categoryStats,
+            generatedAt: new Date()
+        }, "Analytics retrieved successfully")
+    );
+});
+
+// Add comment to report
+export const addComment = asyncHandler(async (req, res) => {
+    const { reportId } = req.params;
+    const { message } = req.body;
+
+    if (!message || !message.trim()) {
+        throw new ApiError(400, "Comment message is required");
+    }
+
+    const report = await Report.findOne({ reportId });
+    if (!report) {
+        throw new ApiError(404, "Report not found");
+    }
+
+    report.updates.push({
+        date: new Date(),
+        message: message.trim(),
+        updatedBy: req.user._id
+    });
+
+    await report.save();
+
+    const updatedReport = await Report.findById(report._id)
+        .populate('updates.updatedBy', 'name role');
+
+    res.status(200).json(
+        new ApiResponse(200, updatedReport.updates, "Comment added successfully")
+    );
+});
+
+// Get report comments
+export const getReportComments = asyncHandler(async (req, res) => {
+    const { reportId } = req.params;
+
+    const report = await Report.findOne({ reportId })
+        .populate('updates.updatedBy', 'name role avatar')
+        .select('updates');
+
+    if (!report) {
+        throw new ApiError(404, "Report not found");
+    }
+
+    res.status(200).json(
+        new ApiResponse(200, report.updates, "Comments retrieved successfully")
+    );
 });
 
 // Delete report (Admin only)
-const deleteReport = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
+export const deleteReport = asyncHandler(async (req, res) => {
+    const { reportId } = req.params;
 
-  const report = await Report.findOne({ reportId });
-  if (!report) {
-    throw new ApiError(404, "Report not found");
-  }
+    const report = await Report.findOne({ reportId });
+    if (!report) {
+        throw new ApiError(404, "Report not found");
+    }
 
-  // Delete associated media from Cloudinary
-  if (report.media && report.media.publicId) {
-    await deleteFromCloudinary(report.media.publicId);
-  }
+    // Delete associated media from Cloudinary
+    if (report.image?.publicId) {
+        await deleteMediaOnCloudinary(report.image.publicId, 'image');
+    }
 
-  await Report.findByIdAndDelete(report._id);
+    // Delete voice message from Cloudinary
+    if (report.voiceMessage?.publicId) {
+        await deleteMediaOnCloudinary(report.voiceMessage.publicId, 'video');
+    }
 
-  res.status(200).json(
-    new ApiResponse(200, {}, "Report deleted successfully")
-  );
+    // Delete resolution evidence from Cloudinary
+    if (report.resolutionEvidence?.resolutionImage?.publicId) {
+        await deleteMediaOnCloudinary(report.resolutionEvidence.resolutionImage.publicId, 'image');
+    }
+
+    await Report.findByIdAndDelete(report._id);
+
+    res.status(200).json(
+        new ApiResponse(200, {}, "Report deleted successfully")
+    );
 });
 
-// Get reports by municipality (for municipal dashboard)
-const getReportsByMunicipality = asyncHandler(async (req, res) => {
-  const { municipalityId } = req.params;
-  const { page = 1, limit = 10, status, category, priority } = req.query;
-
-  // Check if user has access to this municipality
-  if (req.user.role === 'staff' && req.user.municipality?.toString() !== municipalityId) {
-    throw new ApiError(403, "Access denied to this municipality's reports");
-  }
-
-  const filter = { municipality: municipalityId };
-  if (status) filter.status = status;
-  if (category) filter.category = category;
-  if (priority) filter.priority = priority;
-
-  const reports = await Report.find(filter)
-    .populate('reportedBy', 'name')
-    .populate('department', 'name')
-    .populate('assignedTo', 'name')
-    .sort({ priority: -1, date: -1 })
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
-    .exec();
-
-  const totalReports = await Report.countDocuments(filter);
-
-  res.status(200).json(
-    new ApiResponse(200, {
-      reports,
-      totalPages: Math.ceil(totalReports / limit),
-      currentPage: parseInt(page),
-      totalReports
-    }, "Municipality reports retrieved successfully")
-  );
-});
-
-export {
-  createReport,
-  getAllReports,
-  getReportById,
-  updateReportStatus,
-  upvoteReport,
-  removeUpvote,
-  addFeedback,
-  getUserReports,
-  getReportsAnalytics,
-  deleteReport,
-  getReportsByMunicipality
-};

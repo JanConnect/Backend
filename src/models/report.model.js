@@ -50,20 +50,17 @@ const reportSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
-  
   upvoteCount: {
     type: Number,
     default: 0
   },
   
-  // Combined priority score (1-5)
+  // **FIXED: Combined priority score (1-5) - Remove default function**
   priority: {
     type: Number,
     min: 1,
     max: 5,
-    default: function() {
-      return this.calculatePriority();
-    }
+    default: 2 // Simple default value instead of function
   },
   
   // Breakdown of priority components for transparency
@@ -90,20 +87,86 @@ const reportSchema = new mongoose.Schema({
   
   status: {
     type: String,
-    enum: ["pending", "acknowledged", "in-progress", "resolved", "rejected"],
+    enum: ["pending", "acknowledged", "in-progress", "resolved", "rejected", "pending_assignment"],
     default: "pending"
   },
+  
+  // **FIXED: Use 'date' field consistently**
   date: {
     type: Date,
     default: Date.now
   },
+  
   resolvedDate: {
     type: Date
   },
+  
+  resolutionTime: {
+    type: Number // in hours
+  },
+  
   description: {
     type: String,
-    required: true
+    required: function() {
+      return !this.voiceMessage?.url; // Required only if no voice message
+    }
   },
+  
+  // **NEW: Voice message support**
+  voiceMessage: {
+    url: String,
+    publicId: String,
+    duration: Number,
+    transcription: String, // For search functionality
+    uploadedAt: Date
+  },
+  
+  // **UPDATED: Single image support**
+  image: {
+    url: String,
+    publicId: String,
+    uploadedAt: Date
+  },
+  
+  // **NEW: Resolution evidence**
+  resolutionEvidence: {
+    resolutionImage: {
+      url: String,
+      publicId: String,
+      uploadedAt: Date,
+      description: String,
+      uploadedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+      }
+    },
+    resolutionNotes: String,
+    workCompletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    },
+    completionDate: Date,
+    materialsCost: Number,
+    laborHours: Number
+  },
+  
+  // **NEW: Verification data**
+  verificationData: {
+    userLocation: {
+      lat: Number,
+      lng: Number
+    },
+    distanceFromUser: Number,
+    isLocationVerified: Boolean,
+    verificationRadius: Number,
+    smartScore: Number,
+    smartVerified: Boolean,
+    verificationMethod: String,
+    locationScore: Number,
+    timingScore: Number,
+    qualityScore: Number
+  },
+  
   location: {
     type: {
       type: String,
@@ -114,50 +177,84 @@ const reportSchema = new mongoose.Schema({
       type: [Number],
       required: true
     },
-    address: {  
+    address: {
       type: String,
       default: 'Unknown Location'
     }
   },
-    media: {
-        url: String,
-        publicId: String,
-        type: {
-            type: String,
-            enum: ['image', 'video']
-        },
-     },
+  
+  // **DEPRECATED: Old media field (keep for backward compatibility)**
+  media: {
+    url: String,
+    publicId: String,
+    type: {
+      type: String,
+      enum: ['image', 'video']
+    },
+  },
+  
   reportedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: true
   },
+  
   municipality: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Municipality"
   },
+  
   department: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Department"
   },
+  
   assignedTo: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User"
   },
+  
+  assignmentType: {
+    type: String,
+    enum: ["automatic", "manual", "pending"],
+    default: "pending"
+  },
+  
   updates: [updateSchema],
+  
+  // **NEW: Comments system**
+  comments: [{
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true
+    },
+    comment: {
+      type: String,
+      required: true
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  
   rating: {
     type: Number,
     min: 1,
     max: 5
   },
+  
   feedback: {
     type: String
   },
-
+  
 }, { timestamps: true });
 
+// Indexes
 reportSchema.index({ location: "2dsphere" });
-// Combined Priority Calculation Method
+
+// **FIXED: Priority calculation method with null checks**
 reportSchema.methods.calculatePriority = function() {
   // Base urgency scores
   const urgencyScores = {
@@ -190,9 +287,14 @@ reportSchema.methods.calculatePriority = function() {
     }
   }
   
-  // Time decay factor (newer reports get slight boost)
-  const reportAge = (Date.now() - this.date.getTime()) / (1000 * 60 * 60 * 24);
-  const timeBoost = reportAge < 1 ? 0.2 : (reportAge < 7 ? 0.1 : 0);
+  // **FIXED: Time decay factor with null check**
+  let timeBoost = 0;
+  const reportDate = this.date || this.createdAt || new Date();
+  
+  if (reportDate) {
+    const reportAge = (Date.now() - reportDate.getTime()) / (1000 * 60 * 60 * 24);
+    timeBoost = reportAge < 1 ? 0.2 : (reportAge < 7 ? 0.1 : 0);
+  }
   
   // Final priority calculation
   let finalPriority = urgencyScore + communityBoost + timeBoost;
@@ -211,10 +313,16 @@ reportSchema.methods.calculatePriority = function() {
   return Math.round(finalPriority);
 };
 
-// Auto-update priority when upvotes change
+// **FIXED: Pre-save hook to calculate priority safely**
 reportSchema.pre('save', function(next) {
-  if (this.isModified('upvoteCount') || this.isModified('urgency')) {
-    this.priority = this.calculatePriority();
+  // Calculate priority only if document has required fields
+  if (this.urgency && (this.date || this.createdAt)) {
+    try {
+      this.priority = this.calculatePriority();
+    } catch (error) {
+      console.error('Priority calculation error:', error);
+      this.priority = 2; // Fallback to default
+    }
   }
   next();
 });
@@ -232,7 +340,6 @@ reportSchema.methods.addUpvote = function(userId) {
   this.upvotes.push({ userId });
   this.upvoteCount = this.upvotes.length;
   this.priority = this.calculatePriority();
-  
   return this.save();
 };
 
@@ -243,8 +350,24 @@ reportSchema.methods.removeUpvote = function(userId) {
   );
   this.upvoteCount = this.upvotes.length;
   this.priority = this.calculatePriority();
-  
   return this.save();
+};
+
+// **NEW: Method to get content summary**
+reportSchema.methods.getContentSummary = function() {
+  if (this.description) {
+    return this.description.length > 100 ? 
+      this.description.substring(0, 100) + '...' : 
+      this.description;
+  } else if (this.voiceMessage?.transcription) {
+    return this.voiceMessage.transcription.length > 100 ? 
+      this.voiceMessage.transcription.substring(0, 100) + '...' : 
+      this.voiceMessage.transcription;
+  } else if (this.voiceMessage?.url) {
+    return '[Voice Message]';
+  } else {
+    return 'No description available';
+  }
 };
 
 // Performance indexes
@@ -253,5 +376,8 @@ reportSchema.index({ department: 1, status: 1, priority: -1 });
 reportSchema.index({ priority: -1, urgency: 1, upvoteCount: -1 });
 reportSchema.index({ reportedBy: 1 });
 reportSchema.index({ 'upvotes.userId': 1 });
+reportSchema.index({ status: 1, createdAt: -1 });
+reportSchema.index({ assignmentType: 1 });
 
 export const Report = mongoose.model("Report", reportSchema);
+

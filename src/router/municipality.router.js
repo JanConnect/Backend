@@ -2,40 +2,41 @@ import { Router } from "express";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { authorizeRoles } from "../middlewares/auth.middleware.js";
 import {
-  createMunicipality,
-  getAllMunicipalities,
-  getMunicipalityById,
-  updateMunicipality,
-  deleteMunicipality,
-  getMunicipalitiesNearLocation,
-  addDepartmentToMunicipality,
-  removeDepartmentFromMunicipality
+    createMunicipality,
+    getAllMunicipalities,
+    getMunicipalityById,
+    updateMunicipality,
+    deleteMunicipality,
+    getMunicipalitiesNearLocation,
+    addDepartmentToMunicipality,
+    getMunicipalityAnalytics,
+    manualAssignReport
 } from "../controllers/municipality.controller.js";
 
 const router = Router();
 
-// Create municipality (Admin only)
-router.route("/create").post(verifyJWT, authorizeRoles('admin'), createMunicipality);
+// All routes require authentication
+router.use(verifyJWT);
 
-// Get all municipalities
-router.route("/").get(verifyJWT, getAllMunicipalities);
+// Public municipality routes (authenticated users)
+router.route("/").get(getAllMunicipalities);
+router.route("/near").get(getMunicipalitiesNearLocation);
+router.route("/:municipalityId").get(getMunicipalityById);
+router.route("/:municipalityId/analytics").get(getMunicipalityAnalytics);
 
-// Get municipalities near location
-router.route("/near").get(verifyJWT, getMunicipalitiesNearLocation);
+// Super Admin only routes
+router.route("/create").post(authorizeRoles('superadmin'), createMunicipality);
+router.route("/:municipalityId").patch(authorizeRoles('superadmin'), updateMunicipality);
+router.route("/:municipalityId").delete(authorizeRoles('superadmin'), deleteMunicipality);
 
-// Get municipality by ID
-router.route("/:municipalityId").get(verifyJWT, getMunicipalityById);
-
-// Update municipality (Admin only)
-router.route("/:municipalityId").patch(verifyJWT, authorizeRoles('admin'), updateMunicipality);
-
-// Delete municipality (Admin only)
-router.route("/:municipalityId").delete(verifyJWT, authorizeRoles('admin'), deleteMunicipality);
-
-// Add department to municipality (Admin only)
-router.route("/:municipalityId/departments/:departmentId").post(verifyJWT, authorizeRoles('admin'), addDepartmentToMunicipality);
-
-// Remove department from municipality (Admin only)
-router.route("/:municipalityId/departments/:departmentId").delete(verifyJWT, authorizeRoles('admin'), removeDepartmentFromMunicipality);
+// Municipality Admin routes
+router.route("/:municipalityId/departments").post(
+    authorizeRoles('admin', 'superadmin'), 
+    addDepartmentToMunicipality
+);
+router.route("/:municipalityId/assign-report").post(
+    authorizeRoles('admin', 'superadmin'), 
+    manualAssignReport
+);
 
 export default router;

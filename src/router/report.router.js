@@ -3,50 +3,71 @@ import { upload } from "../middlewares/multer.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { authorizeRoles } from "../middlewares/auth.middleware.js";
 import {
-  createReport,
-  getAllReports,
-  getReportById,
-  updateReportStatus,
-  upvoteReport,
-  removeUpvote,
-  addFeedback,
-  getUserReports,
-  getReportsAnalytics,
-  deleteReport
+    createReport,
+    getAllReports,
+    getReportById,
+    updateReportStatus,
+    upvoteReport,
+    removeUpvote,
+    addFeedback,
+    getUserReports,
+    getReportsAnalytics,
+    deleteReport,
+    addComment,
+    getReportComments
 } from "../controllers/report.controller.js";
 
 const router = Router();
 
-// Create report with media upload
+// All routes require authentication
+router.use(verifyJWT);
+
+// Create report with single image + optional voice message
 router.route("/create").post(
-upload.single('media'),
-  verifyJWT,
-  createReport
+    upload.fields([
+        { name: 'image', maxCount: 1 },         // Single image
+        { name: 'voiceMessage', maxCount: 1 }   // Single voice message
+    ]),
+    createReport
 );
 
-// Get all reports
-router.route("/").get(verifyJWT, getAllReports);
+// Get all reports with filtering
+router.route("/").get(getAllReports);
 
-// Get user reports
-router.route("/user/me").get(verifyJWT, getUserReports);
+// Get user's own reports
+router.route("/user/me").get(getUserReports);
 
-// Get analytics (staff/admin)
-router.route("/analytics").get(verifyJWT, authorizeRoles('staff', 'admin'), getReportsAnalytics);
+// Get analytics (staff/admin only)
+router.route("/analytics").get(
+    authorizeRoles('staff', 'admin', 'superadmin'), 
+    getReportsAnalytics
+);
 
-// Get single report
-router.route("/:reportId").get(verifyJWT, getReportById);
+// Get single report by reportId
+router.route("/:reportId").get(getReportById);
 
-// Update report status (staff/admin)
-router.route("/:reportId/status").patch(verifyJWT, authorizeRoles('staff', 'admin'), updateReportStatus);
+// Update report status with single resolution image (staff/admin only)
+router.route("/:reportId/status").patch(
+    upload.single('resolutionImage'),  // Single resolution image
+    authorizeRoles('staff', 'admin', 'superadmin'),
+    updateReportStatus
+);
 
-// Upvote system
-router.route("/:reportId/upvote").post(verifyJWT, upvoteReport);
-router.route("/:reportId/upvote").delete(verifyJWT, removeUpvote);
+// Community engagement routes
+router.route("/:reportId/upvote").post(upvoteReport);
+router.route("/:reportId/upvote").delete(removeUpvote);
 
-// Add feedback
-router.route("/:reportId/feedback").post(verifyJWT, addFeedback);
+// Comments system
+router.route("/:reportId/comment").post(addComment);
+router.route("/:reportId/comments").get(getReportComments);
+
+// Feedback system (report creator only)
+router.route("/:reportId/feedback").post(addFeedback);
 
 // Delete report (admin only)
-router.route("/:reportId").delete(verifyJWT, authorizeRoles('admin'), deleteReport);
+router.route("/:reportId").delete(
+    authorizeRoles('admin', 'superadmin'), 
+    deleteReport
+);
 
 export default router;

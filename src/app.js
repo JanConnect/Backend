@@ -25,9 +25,9 @@ import municipalityRouter from './router/municipality.router.js';
 import adminRouter from "./router/admin.router.js"
 
 app.use("/api/v1/user", userRouter);
-app.use("/api/v1/report", reportRuter);
-app.use("/api/v1/municipality", municipalityRouter);
-app.use("/api/v1/department", departmentRouter);
+app.use("/api/v1/reports", reportRuter);
+app.use("/api/v1/municipalities", municipalityRouter);
+app.use("/api/v1/departments", departmentRouter);
 app.use("/api/v1/admin", adminRouter);
 
 app.use((err, req, res, next) => {
