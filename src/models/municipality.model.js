@@ -19,12 +19,20 @@ const municipalitySchema = new mongoose.Schema({
       ref: "Department",
     }
   ],
-  contactPerson: {
-    name: String,
-    designation: String,
-    phone: String,
-    email: String,
-  },
+   admin: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+        validate: {
+            validator: async function(adminId) {
+                const User = mongoose.model('User');
+                const user = await User.findById(adminId);
+                return user && (user.role === 'admin' || user.role === 'superadmin');
+            },
+            message: 'Admin must have admin or superadmin role'
+        }
+    },
+  //location of municipality
   location: {
     type: {
         type: String,
@@ -36,17 +44,10 @@ const municipalitySchema = new mongoose.Schema({
         required: true
         },
   },
-  location: {
-    type: {
-      type: String,
-      enum: ['Point'],
-      default: 'Point'
-    },
-    coordinates: {
-      type: [Number],
-      required: true
-    },
-  },
+  reports: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Report",
+    }],
 },{timestamps:true});
 
 municipalitySchema.index({ location: "2dsphere" });
