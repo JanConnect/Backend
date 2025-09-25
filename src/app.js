@@ -8,8 +8,10 @@ const app = express()
 app.use(
   cors({
     origin: [
-      "https://janconnect.github.io", // GitHub Pages frontend
-      "https://jan-connect-git-main-aditi-bansals-projects.vercel.app" // Vercel frontend
+      "https://jan-connect-one.vercel.app",
+      "https://jan-connect-git-main-aditi-bansals-projects.vercel.app" ,
+      "http://localhost:5173",
+      "https://janconnect.github.io"
     ],
     credentials: true
   })
