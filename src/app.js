@@ -16,6 +16,9 @@ app.use(
     credentials: true
   })
 );
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", message: "Backend is running!" });
+});
 
 
 app.use(express.json({limit:"16kb"}))
