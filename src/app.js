@@ -7,8 +7,10 @@ const app = express()
 //Middlewares
 app.use(
   cors({
-    origin: "https://jan-connect-git-main-aditi-bansals-projects.vercel.app/",
-    credentials: true,
+    origin: [
+          "https://janconnect.github.io/JanConnect/",
+          "https://jan-connect-git-main-aditi-bansals-projects.vercel.app" // add your Vercel URL
+        ],    credentials: true,
   })
 );
 
