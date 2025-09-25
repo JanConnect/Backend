@@ -6,11 +6,12 @@ const app = express()
 
 //Middlewares
 app.use(
-    cors({
-        origin : "https://janconnect.github.io/JanConnect/",  //frontend url
-        credentials: true
-    })
-)
+  cors({
+    origin: "https://janconnect.github.io/JanConnect",
+    credentials: true,
+  })
+);
+
 
 app.use(express.json({limit:"16kb"}))
 app.use(express.urlencoded({extended: true , limit:"16kb"}))
