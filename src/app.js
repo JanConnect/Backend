@@ -9,24 +9,18 @@ const allowedOrigins = [
   "https://janconnect.github.io/JanConnect",
   "https://jan-connect-git-main-aditi-bansals-projects.vercel.app"
 ];
-
-// Enable CORS
 app.use(cors({
-  origin: function (origin, callback) {
-    // allow requests with no origin like Postman
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(new Error("Not allowed by CORS"), false);
-    }
-    return callback(null, true);
-  },
-  credentials: true,
+  origin: [
+    "https://janconnect.github.io/JanConnect",
+    "https://jan-connect-git-main-aditi-bansals-projects.vercel.app"
+  ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  optionsSuccessStatus: 200
+  credentials: true
 }));
 
-// Handle preflight requests for all routes
+// Make sure OPTIONS requests are handled
 app.options("*", cors());
+
 
 // Middlewares
 app.use(express.json({ limit: "16kb" }));
