@@ -1,39 +1,32 @@
-import express from "express";
-import cors from "cors";
-import cookieParser from "cookie-parser";
+import express from "express"
+import cors from "cors"
+import cookieParser from "cookie-parser"
 
-const app = express();
+const app = express()
 
-// List of allowed origins
-const allowedOrigins = [
-  "https://janconnect.github.io/JanConnect",
-  "https://jan-connect-git-main-aditi-bansals-projects.vercel.app"
-];
-app.use(cors({
-  origin: [
-    "https://janconnect.github.io/JanConnect",
-    "https://jan-connect-git-main-aditi-bansals-projects.vercel.app"
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  credentials: true
-}));
-
-// Make sure OPTIONS requests are handled
-app.options("*", cors());
+//Middlewares
+app.use(
+  cors({
+    origin: [
+      "https://janconnect.github.io", // GitHub Pages frontend
+      "https://jan-connect-git-main-aditi-bansals-projects.vercel.app" // Vercel frontend
+    ],
+    credentials: true
+  })
+);
 
 
-// Middlewares
-app.use(express.json({ limit: "16kb" }));
-app.use(express.urlencoded({ extended: true, limit: "16kb" }));
-app.use(express.static("public"));
-app.use(cookieParser());
+app.use(express.json({limit:"16kb"}))
+app.use(express.urlencoded({extended: true , limit:"16kb"}))
+app.use(express.static("public"))
+app.use(cookieParser())
 
-// Routes
+//Routes
 import userRouter from "./router/user.router.js";
 import reportRuter from "./router/report.router.js";
 import departmentRouter from './router/department.router.js';
 import municipalityRouter from './router/municipality.router.js';
-import adminRouter from "./router/admin.router.js";
+import adminRouter from "./router/admin.router.js"
 
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/reports", reportRuter);
@@ -41,7 +34,6 @@ app.use("/api/v1/municipalities", municipalityRouter);
 app.use("/api/v1/departments", departmentRouter);
 app.use("/api/v1/admin", adminRouter);
 
-// Error handler
 app.use((err, req, res, next) => {
   const status = err.statuscode || 500;
   res.status(status).json({
@@ -51,4 +43,4 @@ app.use((err, req, res, next) => {
   });
 });
 
-export { app };
+export {app}
