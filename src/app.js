@@ -8,11 +8,7 @@ const app = express()
 app.use(
   cors({
     origin: [
-      "https://jan-connect-one.vercel.app",
-      "https://jan-connect-git-main-aditi-bansals-projects.vercel.app" ,
-      "http://localhost:5173",
-      "https://janconnect.github.io",
-       "http://localhost:4173"
+      "https://jan-connect-kappa.vercel.app"
     ],
     credentials: true
   })
