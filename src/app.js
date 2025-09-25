@@ -7,7 +7,7 @@ const app = express()
 //Middlewares
 app.use(
     cors({
-        origin : "http://localhost:5173",  //frontend url
+        origin : "https://janconnect.github.io/JanConnect/",  //frontend url
         credentials: true
     })
 )
