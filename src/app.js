@@ -7,7 +7,7 @@ const app = express()
 //Middlewares
 app.use(
   cors({
-    origin: "https://janconnect.github.io",
+    origin: "https://jan-connect-git-main-aditi-bansals-projects.vercel.app/",
     credentials: true,
   })
 );
