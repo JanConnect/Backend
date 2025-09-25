@@ -7,7 +7,7 @@ const app = express()
 //Middlewares
 app.use(
   cors({
-    origin: "https://janconnect.github.io/JanConnect",
+    origin: "https://janconnect.github.io",
     credentials: true,
   })
 );
