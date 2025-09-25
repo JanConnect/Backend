@@ -11,7 +11,8 @@ app.use(
       "https://jan-connect-one.vercel.app",
       "https://jan-connect-git-main-aditi-bansals-projects.vercel.app" ,
       "http://localhost:5173",
-      "https://janconnect.github.io"
+      "https://janconnect.github.io",
+       "http://localhost:4173"
     ],
     credentials: true
   })
