@@ -487,7 +487,6 @@ export const createReport = asyncHandler(async (req, res) => {
 
         // Auto-assign to department based on category (if not "Other")
         if (category !== "Other") {
-            debugLog('🔍 Looking for department for category', { category });
             const department = await Department.findOne({
                 municipality: selectedMunicipality._id,
                 categories: { $in: [category] }
@@ -497,16 +496,10 @@ export const createReport = asyncHandler(async (req, res) => {
                 reportData.department = department._id;
                 reportData.assignmentType = "automatic";
                 reportData.status = "assigned";
-                debugLog('✅ Department auto-assigned', { department: department.name });
-            } else {
-                debugLog('❌ No department found for category', { category });
-                reportData.status = "pending_assignment";
-                reportData.assignmentType = "pending";
             }
         } else {
             reportData.status = "pending_assignment";
             reportData.assignmentType = "pending";
-            debugLog('⚡ Category is "Other", set to pending assignment');
         }
 
         debugLog('💾 Creating report in database', { reportData: Object.keys(reportData) });
