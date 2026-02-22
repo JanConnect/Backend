@@ -6,7 +6,7 @@ import {
     createReport,
     getAllReports,
     getReportById,
-    updateReportStatus,
+    updateReportStatusJson,  // Fixed typo: changed from Jason to Json
     upvoteReport,
     removeUpvote,
     addFeedback,
@@ -46,11 +46,10 @@ router.route("/analytics").get(
 // Get single report by reportId
 router.route("/:reportId").get(getReportById);
 
-// Update report status with single resolution image (staff/admin only)
-router.route("/:reportId/status").patch(
-    upload.single('resolutionImage'),  // Single resolution image
+// Add this new route for JSON status updates
+router.route("/:reportId/status/json").patch(
     authorizeRoles('staff', 'admin', 'superadmin'),
-    updateReportStatus
+    updateReportStatusJson  // Fixed typo here
 );
 
 // Community engagement routes

@@ -779,15 +779,37 @@ export const getReportById = asyncHandler(async (req, res) => {
     );
 });
 
-// Update report status with single resolution image
-export const updateReportStatus = asyncHandler(async (req, res) => {
-    const { reportId } = req.params;
-    const { status, message, resolutionNotes, materialsCost, laborHours } = req.body;
+// Update report status with JSON (no image)
+export const updateReportStatusJson = asyncHandler(async (req, res) => {
+    console.log('📝 UPDATE STATUS REQUEST RECEIVED:');
+    console.log('📍 Report ID:', req.params.reportId);
+    console.log('📦 Request Body:', req.body);
 
-    const report = await Report.findOne({ reportId });
+    const { reportId } = req.params;
+    const { status, message } = req.body;
+
+    // Validate inputs
+    if (!status) {
+        throw new ApiError(400, "Status is required");
+    }
+
+    // Try to find by both reportId and _id
+    let report = await Report.findOne({ reportId });
+    
+    if (!report) {
+        // If not found by reportId, try by _id
+        report = await Report.findById(reportId);
+    }
+
     if (!report) {
         throw new ApiError(404, "Report not found");
     }
+
+    console.log('✅ Report found:', {
+        id: report._id,
+        reportId: report.reportId,
+        currentStatus: report.status
+    });
 
     // Permission check
     if (req.user.role === 'staff' &&
@@ -795,73 +817,30 @@ export const updateReportStatus = asyncHandler(async (req, res) => {
         throw new ApiError(403, "You can only update reports from your department");
     }
 
-    const validStatuses = ["pending", "acknowledged", "in-progress", "resolved", "rejected", "pending_assignment"];
+    const validStatuses = ["pending", "acknowledged", "in-progress", "resolved", "rejected", "pending_assignment", "assigned"];
     if (status && !validStatuses.includes(status)) {
         throw new ApiError(400, "Invalid status provided");
     }
 
-    let resolutionImageData = null;
-    
-    // Handle single resolution image upload for resolved reports
-    if (status === 'resolved' && req.file) {
-        try {
-            console.log(`📁 Uploading resolution image:`, req.file.originalname);
-            const imageUpload = await uploadMediaOnCloudinary(req.file.path, 'resolution');
-            
-            if (imageUpload) {
-                resolutionImageData = {
-                    url: imageUpload.url,
-                    publicId: imageUpload.publicId,
-                    uploadedAt: new Date(),
-                    description: `Resolution evidence for ${report.title}`,
-                    uploadedBy: req.user._id
-                };
-                console.log(`✅ Resolution image uploaded successfully`);
-            }
-
-            // Clean up local file
-            if (fs.existsSync(req.file.path)) {
-                fs.unlinkSync(req.file.path);
-            }
-        } catch (error) {
-            // Clean up uploaded image on error
-            if (resolutionImageData?.publicId) {
-                await deleteMediaOnCloudinary(resolutionImageData.publicId, 'image');
-            }
-            throw error;
-        }
-    }
-
     // Update report status
     if (status) {
+        const oldStatus = report.status;
         report.status = status;
+        console.log(`🔄 Status changed from ${oldStatus} to ${status}`);
         
         if (status === 'resolved') {
             report.resolvedDate = new Date();
-            report.resolutionTime = (new Date() - report.date) / (1000 * 60 * 60); // hours
-            
-            if (resolutionImageData || resolutionNotes || materialsCost || laborHours) {
-                report.resolutionEvidence = {
-                    ...report.resolutionEvidence,
-                    resolutionImage: resolutionImageData,
-                    resolutionNotes,
-                    workCompletedBy: req.user._id,
-                    completionDate: new Date(),
-                    materialsCost,
-                    laborHours
-                };
-            }
+            report.resolutionTime = (new Date() - report.createdAt) / (1000 * 60 * 60);
         }
     }
 
     // Add status update message
-    if (message) {
-        report.updates.push({
-            date: new Date(),
-            message,
-            updatedBy: req.user._id
-        });
-    }
+    const updateMessage = message || `Status changed to ${status}`;
+    report.updates.push({
+        date: new Date(),
+        message: updateMessage,
+        updatedBy: req.user._id
+    });
 
     // Auto-assign to current staff member if not assigned
     if (!report.assignedTo && req.user.role === 'staff') {
@@ -875,6 +854,9 @@ export const updateReportStatus = asyncHandler(async (req, res) => {
         .populate('assignedTo', 'name')
         .populate('updates.updatedBy', 'name')
         .populate('resolutionEvidence.workCompletedBy', 'name');
+
+    console.log('✅ Status update successful. New status:', updatedReport.status);
+    console.log('📊 Timeline entries count:', updatedReport.updates?.length);
 
     res.status(200).json(
         new ApiResponse(200, updatedReport, "Report status updated successfully")

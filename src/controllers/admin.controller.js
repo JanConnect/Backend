@@ -705,4 +705,3 @@ export const getSystemHealth = asyncHandler(async (req, res) => {
         }, "System health retrieved successfully")
     );
 });
-
